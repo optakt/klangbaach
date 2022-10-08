@@ -307,16 +307,17 @@ func main() {
 
 			var timestamp time.Time
 			row := db.QueryRowx("SELECT timestamp FROM height_to_timestamp WHERE height=$1", height)
-			if row.Err() == nil {
-				err = row.Scan(&timestamp)
-				if err != nil {
-					log.Fatal().Err(err).Msg("could not scan timestamp")
-				}
+			err = row.Err()
+			if err != nil {
+				log.Fatal().Err(err).Msg("could not select rows from database")
+			}
+			err = row.Scan(&timestamp)
+			if err == nil {
 				timestamps[height] = timestamp
 				continue
 			}
-			if !errors.Is(row.Err(), sql.ErrNoRows) {
-				log.Fatal().Err(row.Err()).Msg("could not select rows from database")
+			if !errors.Is(err, sql.ErrNoRows) {
+				log.Fatal().Err(err).Msg("could not scan row to timestamp")
 			}
 
 			log.Warn().Uint64("height", height).Msg("height not found in database, executing API request")
@@ -377,7 +378,7 @@ func main() {
 				Float64("reserve1", reserve1Float).
 				Float64("volume0", volume0Float).
 				Float64("volume1", volume1Float).
-				Msg("writing datapoint")
+				Msg("datapoint queued for writing")
 
 			tags := map[string]string{
 				"pair": pairName,

@@ -162,7 +162,7 @@ func main() {
 
 			batch := mappings[i:j]
 
-			_, err = db.NamedExec(`INSERT INTO height_to_timestamp (height, timestamp) VALUES (:height, :timestamp)`, batch)
+			_, err = db.NamedExec(`INSERT INTO height_to_timestamp (height, timestamp) VALUES (:height, :timestamp) ON CONFLICT DO NOTHING`, batch)
 			if err != nil {
 				log.Fatal().Err(err).Msg("could not execute batch insertion")
 			}

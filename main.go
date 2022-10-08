@@ -188,6 +188,7 @@ func main() {
 		log.Fatal().Msg("InfluxDB API not ready")
 	}
 
+	batch := influx.WriteAPI(influxOrg, influxBucket)
 	for from := startHeight; from < lastHeight; from += uint64(batchSize) {
 
 		if from > lastHeight {
@@ -292,7 +293,6 @@ func main() {
 			return heights[i] < heights[j]
 		})
 
-		points := make([]*write.Point, 0, len(heights))
 		for _, height := range heights {
 
 			timestamp := timestamps[height]
@@ -339,15 +339,11 @@ func main() {
 			}
 
 			point := write.NewPoint("ethereum", tags, fields, timestamp)
-			points = append(points, point)
-		}
-
-		batch := influx.WriteAPIBlocking(influxOrg, influxBucket)
-		err = batch.WritePoint(context.Background(), points...)
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not write influxdb points")
+			batch.WritePoint(point)
 		}
 	}
+
+	batch.Flush()
 
 	log.Info().Msg("stopping klangbaach data miner")
 

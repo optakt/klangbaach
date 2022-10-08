@@ -134,9 +134,10 @@ func main() {
 
 		var swap Swap
 		var sync Sync
+		reserves0 := make(map[uint64]*big.Int)
+		reserves1 := make(map[uint64]*big.Int)
 		volumes0 := make(map[uint64]*big.Int)
 		volumes1 := make(map[uint64]*big.Int)
-		liquidities := make(map[uint64]*big.Int)
 		timestamps := make(map[uint64]time.Time)
 		for _, entry := range entries {
 
@@ -144,6 +145,32 @@ func main() {
 			timestamps[height] = time.Time{}
 
 			switch entry.Topics[0] {
+
+			case SigSync:
+
+				err := pair.UnpackIntoInterface(&sync, "Sync", entry.Data)
+				if err != nil {
+					log.Fatal().Err(err).Msg("could not unpack sync event")
+				}
+
+				reserve0, ok := reserves0[height]
+				if !ok {
+					reserve0 = big.NewInt(0)
+					reserves0[height] = reserve0
+				}
+				reserve0.Add(reserve0, sync.Reserve0)
+
+				reserve1, ok := reserves1[height]
+				if !ok {
+					reserve1 = big.NewInt(0)
+					reserves1[height] = reserve1
+				}
+				reserve1.Add(reserve1, sync.Reserve1)
+
+				log.Debug().
+					Str("reserve0", sync.Reserve0.String()).
+					Str("reserve1", sync.Reserve1.String()).
+					Msg("sync decoded")
 
 			case SigSwap:
 
@@ -167,34 +194,9 @@ func main() {
 				volume1.Add(volume1, swap.Amount1In)
 
 				log.Debug().
-					Str("amount0in", swap.Amount0In.String()).
-					Str("amount1in", swap.Amount1In.String()).
-					Str("amount0out", swap.Amount0Out.String()).
-					Str("amount1out", swap.Amount1Out.String()).
 					Str("volume0", volume0.String()).
 					Str("volume1", volume1.String()).
 					Msg("swap decoded")
-
-			case SigSync:
-
-				err := pair.UnpackIntoInterface(&sync, "Sync", entry.Data)
-				if err != nil {
-					log.Fatal().Err(err).Msg("could not unpack sync event")
-				}
-
-				liquidity, ok := liquidities[height]
-				if !ok {
-					liquidity = big.NewInt(0)
-					liquidities[height] = liquidity
-				}
-				liquidity.Mul(sync.Reserve0, sync.Reserve1)
-				liquidity.Sqrt(liquidity)
-
-				log.Debug().
-					Str("reserve0", sync.Reserve0.String()).
-					Str("reserve1", sync.Reserve1.String()).
-					Str("liquidity", liquidity.String()).
-					Msg("sync decoded")
 			}
 		}
 
@@ -218,6 +220,16 @@ func main() {
 		for _, height := range heights {
 
 			timestamp := timestamps[height]
+
+			reserve0, ok := reserves0[height]
+			if !ok {
+				reserve0 = big.NewInt(0)
+			}
+			reserve1, ok := reserves1[height]
+			if !ok {
+				reserve1 = big.NewInt(0)
+			}
+
 			volume0, ok := volumes0[height]
 			if !ok {
 				volume0 = big.NewInt(0)
@@ -226,29 +238,28 @@ func main() {
 			if !ok {
 				volume1 = big.NewInt(0)
 			}
-			liquidity, ok := liquidities[height]
-			if !ok {
-				liquidity = big.NewInt(0)
-			}
 
+			reserve0Float, _ := big.NewFloat(0).SetInt(reserve0).Float64()
+			reserve1Float, _ := big.NewFloat(0).SetInt(reserve1).Float64()
 			volume0Float, _ := big.NewFloat(0).SetInt(volume0).Float64()
 			volume1Float, _ := big.NewFloat(0).SetInt(volume1).Float64()
-			liquidityFloat, _ := big.NewFloat(0).SetInt(liquidity).Float64()
 
 			log.Info().
 				Time("timestamp", timestamp).
+				Float64("reserve0", reserve0Float).
+				Float64("reserve1", reserve1Float).
 				Float64("volume0", volume0Float).
 				Float64("volume1", volume1Float).
-				Float64("liquidity", liquidityFloat).
 				Msg("creating datapoint")
 
 			tags := map[string]string{
 				"pair": pairName,
 			}
 			fields := map[string]interface{}{
-				"volume0":   volume0Float,
-				"volume1":   volume1Float,
-				"liquidity": liquidityFloat,
+				"volume0":  volume0Float,
+				"volume1":  volume1Float,
+				"reserve0": reserve0Float,
+				"reserve1": reserve1Float,
 			}
 
 			point := write.NewPoint("ethereum", tags, fields, timestamp)

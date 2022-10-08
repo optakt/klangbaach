@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"sort"
@@ -12,11 +14,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
-	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	_ "github.com/lib/pq"
+
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
+
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -24,21 +30,28 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+type Mapping struct {
+	Height    uint64    `json:"height"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 func main() {
 
 	var (
-		ethAPI       string
-		logLevel     string
-		pairAddress  string
-		pairName     string
-		startHeight  uint64
-		batchSize    uint
-		firstStable  bool
-		influxAPI    string
-		influxToken  string
-		influxOrg    string
-		influxBucket string
-		gasPrices    string
+		ethAPI           string
+		logLevel         string
+		pairAddress      string
+		pairName         string
+		startHeight      uint64
+		batchSize        uint
+		firstStable      bool
+		influxAPI        string
+		influxToken      string
+		influxOrg        string
+		influxBucket     string
+		gasPrices        string
+		heightTimestamps string
+		postgresServer   string
 	)
 
 	pflag.StringVarP(&ethAPI, "eth-api", "e", "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS", "Ethereum node JSON RPC API URL")
@@ -53,6 +66,8 @@ func main() {
 	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
 	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
 	pflag.StringVarP(&gasPrices, "gas-prices", "g", "export-AvgGasPrice.csv", "CSV file for average gas price per day")
+	pflag.StringVarP(&heightTimestamps, "height-timestamps", "m", "", "CSV for block height to timestamp mapping")
+	pflag.StringVarP(&postgresServer, "postgres-server", "o", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
 
 	pflag.Parse()
 
@@ -75,8 +90,8 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not read gas prices from file")
 	}
-	read := csv.NewReader(bytes.NewReader(data))
-	records, err := read.ReadAll()
+	csvr := csv.NewReader(bytes.NewReader(data))
+	records, err := csvr.ReadAll()
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not read gas price records")
 	}
@@ -92,6 +107,67 @@ func main() {
 		}
 		prices[day] = value
 		fmt.Printf("%s - %d\n", day, value)
+	}
+
+	db, err := sqlx.Connect("postgres", postgresServer)
+	if err != nil {
+		log.Fatal().Str("postgres_server", postgresServer).Err(err).Msg("could not connect to Postgres server")
+	}
+
+	if heightTimestamps != "" {
+
+		file, err := os.Open(heightTimestamps)
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not open height timestamps")
+		}
+
+		csvr := csv.NewReader(file)
+		_, err = csvr.Read()
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not read first line of height to timestamp records")
+		}
+
+		var mappings []Mapping
+		for {
+			record, err := csvr.Read()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			height, err := strconv.ParseUint(record[0], 10, 64)
+			if err != nil {
+				log.Fatal().Err(err).Msg("could not parse block height")
+			}
+			unix, err := strconv.ParseUint(record[1], 10, 64)
+			if err != nil {
+				log.Fatal().Err(err).Msg("could not parse unix timestamp")
+			}
+			timestamp := time.Unix(int64(unix), 0).UTC()
+			mapping := Mapping{
+				Height:    height,
+				Timestamp: timestamp,
+			}
+			mappings = append(mappings, mapping)
+		}
+
+		err = file.Close()
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not close mapping file")
+		}
+
+		for i := 0; i < len(mappings); i += 1000 {
+
+			j := i + 1000
+			if j > len(mappings) {
+				j = len(mappings)
+			}
+
+			batch := mappings[i:j]
+
+			_, err = db.NamedExec(`INSERT INTO height_to_timestamp (height, timestamp) VALUES (:height, :timestamp)`, batch)
+			if err != nil {
+				log.Fatal().Err(err).Msg("could not execute batch insertion")
+			}
+		}
 	}
 
 	eth, err := ethclient.Dial(ethAPI)

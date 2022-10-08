@@ -5,6 +5,8 @@ go 1.19
 require (
 	github.com/ethereum/go-ethereum v1.10.25
 	github.com/influxdata/influxdb-client-go/v2 v2.4.0
+	github.com/jmoiron/sqlx v1.3.5
+	github.com/lib/pq v1.2.0
 	github.com/rs/zerolog v1.28.0
 	github.com/spf13/pflag v1.0.5
 )

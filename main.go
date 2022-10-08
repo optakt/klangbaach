@@ -377,7 +377,7 @@ func main() {
 				Float64("reserve1", reserve1Float).
 				Float64("volume0", volume0Float).
 				Float64("volume1", volume1Float).
-				Msg("writting datapoint")
+				Msg("writing datapoint")
 
 			tags := map[string]string{
 				"pair": pairName,

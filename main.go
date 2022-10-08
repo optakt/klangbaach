@@ -4,11 +4,15 @@ import (
 	"context"
 	"math/big"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
+
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
+	"github.com/influxdata/influxdb-client-go/v2/api/write"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -19,20 +23,30 @@ import (
 func main() {
 
 	var (
-		apiURL      string
-		logLevel    string
-		pairAddress string
-		startHeight uint64
-		batchSize   uint
-		firstStable bool
+		ethAPI       string
+		logLevel     string
+		pairAddress  string
+		pairName     string
+		startHeight  uint64
+		batchSize    uint
+		firstStable  bool
+		influxAPI    string
+		influxToken  string
+		influxOrg    string
+		influxBucket string
 	)
 
-	pflag.StringVarP(&apiURL, "api-url", "a", "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS", "Ethereum node JSON RPC API URL")
+	pflag.StringVarP(&ethAPI, "eth-api", "e", "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS", "Ethereum node JSON RPC API URL")
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
+	pflag.StringVarP(&pairName, "pair-name", "n", "WETH/USDC", "name of the Uniswap v2 pair")
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
 	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
 	pflag.BoolVarP(&firstStable, "first-stable", "f", false, "whether the first symbol in the pair is the stable")
+	pflag.StringVarP(&influxAPI, "influx-api", "i", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
+	pflag.StringVarP(&influxToken, "influx-token", "t", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
+	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
+	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
 
 	pflag.Parse()
 
@@ -42,7 +56,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Str("log_level", logLevel).Err(err).Msg("invalid zerolog log level")
 	}
-	log.Level(level)
+	log = log.Level(level)
 
 	log.Info().Msg("starting klangbaach data miner")
 
@@ -51,14 +65,23 @@ func main() {
 		log.Fatal().Err(err).Msg("invalid Uniswap Pair ABI")
 	}
 
-	client, err := ethclient.Dial(apiURL)
+	eth, err := ethclient.Dial(ethAPI)
 	if err != nil {
-		log.Fatal().Str("api_url", apiURL).Err(err).Msg("could not connect to Ethereum API")
+		log.Fatal().Str("ethAPI", ethAPI).Err(err).Msg("could not connect to Ethereum API")
 	}
 
-	lastHeight, err := client.BlockNumber(context.Background())
+	lastHeight, err := eth.BlockNumber(context.Background())
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not get last block height")
+	}
+
+	influx := influxdb2.NewClient(influxAPI, influxToken)
+	ok, err := influx.Ready(context.Background())
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not connect to InfluxDB API")
+	}
+	if !ok {
+		log.Fatal().Msg("InfluxDB API not ready")
 	}
 
 	for from := startHeight; from < lastHeight; from += uint64(batchSize) {
@@ -76,7 +99,7 @@ func main() {
 			Topics:    [][]common.Hash{{SigSwap, SigSync}},
 		}
 
-		entries, err := client.FilterLogs(context.Background(), query)
+		entries, err := eth.FilterLogs(context.Background(), query)
 		if err != nil {
 			log.Fatal().Err(err).Msg("could not retrieve filtered log entries")
 		}
@@ -89,7 +112,8 @@ func main() {
 		timestamps := make(map[uint64]time.Time)
 		for _, entry := range entries {
 
-			timestamps[entry.BlockNumber] = time.Time{}
+			height := entry.BlockNumber
+			timestamps[height] = time.Time{}
 
 			switch entry.Topics[0] {
 
@@ -100,15 +124,17 @@ func main() {
 					log.Fatal().Err(err).Msg("could not unpack swap event")
 				}
 
-				volume0, ok := volumes0[entry.BlockNumber]
+				volume0, ok := volumes0[height]
 				if !ok {
 					volume0 = big.NewInt(0)
+					volumes0[height] = volume0
 				}
 				volume0.Add(volume0, swap.Amount0In)
 
-				volume1, ok := volumes1[entry.BlockNumber]
+				volume1, ok := volumes1[height]
 				if !ok {
 					volume1 = big.NewInt(0)
+					volumes1[height] = volume1
 				}
 				volume1.Add(volume1, swap.Amount1In)
 
@@ -128,9 +154,10 @@ func main() {
 					log.Fatal().Err(err).Msg("could not unpack sync event")
 				}
 
-				liquidity, ok := liquidities[entry.BlockNumber]
+				liquidity, ok := liquidities[height]
 				if !ok {
 					liquidity = big.NewInt(0)
+					liquidities[height] = liquidity
 				}
 				liquidity.Mul(sync.Reserve0, sync.Reserve1)
 				liquidity.Sqrt(liquidity)
@@ -143,14 +170,67 @@ func main() {
 			}
 		}
 
+		heights := make([]uint64, 0, len(timestamps))
 		for height := range timestamps {
 
-			header, err := client.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
+			header, err := eth.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
 			if err != nil {
 				log.Fatal().Uint64("height", height).Err(err).Msg("could not get header for height")
 			}
 
-			timestamps[height] = time.Unix(int64(header.Time), 0)
+			timestamps[height] = time.Unix(int64(header.Time), 0).UTC()
+			heights = append(heights, height)
+		}
+
+		sort.Slice(heights, func(i int, j int) bool {
+			return heights[i] < heights[j]
+		})
+
+		points := make([]*write.Point, 0, len(heights))
+		for _, height := range heights {
+
+			timestamp := timestamps[height]
+			volume0, ok := volumes0[height]
+			if !ok {
+				volume0 = big.NewInt(0)
+			}
+			volume1, ok := volumes1[height]
+			if !ok {
+				volume1 = big.NewInt(0)
+			}
+			liquidity, ok := liquidities[height]
+			if !ok {
+				liquidity = big.NewInt(0)
+			}
+
+			volume0Float, _ := big.NewFloat(0).SetInt(volume0).Float64()
+			volume1Float, _ := big.NewFloat(0).SetInt(volume1).Float64()
+			liquidityFloat, _ := big.NewFloat(0).SetInt(liquidity).Float64()
+
+			log.Info().
+				Time("timestamp", timestamp).
+				Float64("volume0", volume0Float).
+				Float64("volume1", volume1Float).
+				Float64("liquidity", liquidityFloat).
+				Msg("creating datapoint")
+
+			tags := map[string]string{
+				"pair": pairName,
+			}
+			fields := map[string]interface{}{
+				"volume0":   volume0Float,
+				"volume1":   volume1Float,
+				"liquidity": liquidityFloat,
+			}
+
+			point := write.NewPoint("ethereum", tags, fields, timestamp)
+			points = append(points, point)
+		}
+
+		batch := influx.WriteAPIBlocking(influxOrg, influxBucket)
+		err = batch.WritePoint(context.Background(), points...)
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not write influxdb points")
 		}
 	}
 

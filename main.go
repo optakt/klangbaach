@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"os"
@@ -106,7 +106,6 @@ func main() {
 			log.Fatal().Err(err).Msg("could not parse gas price value")
 		}
 		prices[day] = value
-		fmt.Printf("%s - %d\n", day, value)
 	}
 
 	db, err := sqlx.Connect("postgres", postgresServer)
@@ -286,9 +285,28 @@ func main() {
 		heights := make([]uint64, 0, len(timestamps))
 		for height := range timestamps {
 
+			var timestamp time.Time
+			row := db.QueryRowx("SELECT timestamp FROM height_to_timestamp WHERE height=$1", height)
+			if row.Err() == nil {
+				err = row.Scan(&timestamp)
+				if err != nil {
+					log.Fatal().Err(err).Msg("could not scan timestamp")
+				}
+				timestamps[height] = timestamp
+				continue
+			}
+			if !errors.Is(row.Err(), sql.ErrNoRows) {
+				log.Fatal().Err(row.Err()).Msg("could not select rows from database")
+			}
+
 			header, err := eth.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
 			if err != nil {
 				log.Fatal().Uint64("height", height).Err(err).Msg("could not get header for height")
+			}
+
+			_, err = db.Exec(`INSERT INTO height_to_timestamp (height, timestamp) VALUES ($1, $2)`, height, timestamp)
+			if err != nil {
+				log.Fatal().Err(err).Msg("could not execute insertion of new timestamp")
 			}
 
 			timestamps[height] = time.Unix(int64(header.Time), 0).UTC()

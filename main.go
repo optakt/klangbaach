@@ -86,6 +86,8 @@ func main() {
 		log.Fatal().Err(err).Msg("invalid Uniswap Pair ABI")
 	}
 
+	log.Info().Msg("Uniswap pair ABI loaded")
+
 	data, err := os.ReadFile(gasPrices)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not read gas prices from file")
@@ -108,10 +110,14 @@ func main() {
 		prices[day] = value
 	}
 
+	log.Info().Msg("daily gas price averages loaded from file")
+
 	db, err := sqlx.Connect("postgres", postgresServer)
 	if err != nil {
 		log.Fatal().Str("postgres_server", postgresServer).Err(err).Msg("could not connect to Postgres server")
 	}
+
+	log.Info().Msg("Postgres database connection established")
 
 	if heightTimestamps != "" {
 
@@ -148,6 +154,8 @@ func main() {
 			mappings = append(mappings, mapping)
 		}
 
+		log.Info().Int("mappings", len(mappings)).Msg("height-to-timestamp mappings loaded from CSV file")
+
 		err = file.Close()
 		if err != nil {
 			log.Fatal().Err(err).Msg("could not close mapping file")
@@ -166,6 +174,8 @@ func main() {
 			if err != nil {
 				log.Fatal().Err(err).Msg("could not execute batch insertion")
 			}
+
+			log.Info().Int("from", i).Int("to", j).Msg("batch of mappings inserted into database")
 		}
 	}
 
@@ -178,6 +188,8 @@ func main() {
 		log.Fatal().Err(err).Msg("could not get last block height")
 	}
 
+	log.Info().Msg("connection to Ethereum API established")
+
 	influx := influxdb2.NewClient(influxAPI, influxToken)
 	ok, err := influx.Ready(context.Background())
 	if err != nil {
@@ -186,6 +198,8 @@ func main() {
 	if !ok {
 		log.Fatal().Msg("InfluxDB API not ready")
 	}
+
+	log.Info().Msg("connection to InfluxDB API established")
 
 	batch := influx.WriteAPI(influxOrg, influxBucket)
 	go func() {
@@ -213,6 +227,8 @@ func main() {
 		if err != nil {
 			log.Fatal().Err(err).Msg("could not retrieve filtered log entries")
 		}
+
+		log.Info().Uint64("from", from).Uint64("to", to).Msg("log entries fetched successfully")
 
 		var swap Swap
 		var sync Sync
@@ -313,6 +329,8 @@ func main() {
 			heights = append(heights, height)
 		}
 
+		log.Info().Int("heights", len(heights)).Msg("heights successfully mapped to timestamps")
+
 		sort.Slice(heights, func(i int, j int) bool {
 			return heights[i] < heights[j]
 		})
@@ -350,7 +368,7 @@ func main() {
 				Float64("reserve1", reserve1Float).
 				Float64("volume0", volume0Float).
 				Float64("volume1", volume1Float).
-				Msg("creating datapoint")
+				Msg("writting datapoint")
 
 			tags := map[string]string{
 				"pair": pairName,

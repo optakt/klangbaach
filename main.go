@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"os"
@@ -228,15 +229,20 @@ func main() {
 			log.Fatal().Err(err).Msg("could not retrieve filtered log entries")
 		}
 
-		log.Info().Uint64("from", from).Uint64("to", to).Msg("log entries fetched successfully")
+		log.Info().
+			Uint64("from", from).
+			Uint64("to", to).
+			Int("entries", len(entries)).
+			Msg("log entries fetched successfully")
 
-		var swap Swap
-		var sync Sync
+		timestamps := make(map[uint64]time.Time)
 		reserves0 := make(map[uint64]*big.Int)
 		reserves1 := make(map[uint64]*big.Int)
 		volumes0 := make(map[uint64]*big.Int)
 		volumes1 := make(map[uint64]*big.Int)
-		timestamps := make(map[uint64]time.Time)
+
+		var swap Swap
+		var sync Sync
 		for _, entry := range entries {
 
 			height := entry.BlockNumber
@@ -308,12 +314,15 @@ func main() {
 				if err != nil {
 					log.Fatal().Err(err).Msg("could not scan timestamp")
 				}
+				fmt.Println(timestamp)
 				timestamps[height] = timestamp
 				continue
 			}
 			if !errors.Is(row.Err(), sql.ErrNoRows) {
 				log.Fatal().Err(row.Err()).Msg("could not select rows from database")
 			}
+
+			log.Warn().Uint64("height", height).Msg("height not found in database, executing API request")
 
 			header, err := eth.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
 			if err != nil {

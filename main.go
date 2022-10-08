@@ -189,6 +189,12 @@ func main() {
 	}
 
 	batch := influx.WriteAPI(influxOrg, influxBucket)
+	go func() {
+		for err := range batch.Errors() {
+			log.Fatal().Err(err).Msg("encountered InfluxDB error")
+		}
+	}()
+
 	for from := startHeight; from < lastHeight; from += uint64(batchSize) {
 
 		if from > lastHeight {

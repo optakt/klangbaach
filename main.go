@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"os"
@@ -314,7 +313,6 @@ func main() {
 				if err != nil {
 					log.Fatal().Err(err).Msg("could not scan timestamp")
 				}
-				fmt.Println(timestamp)
 				timestamps[height] = timestamp
 				continue
 			}

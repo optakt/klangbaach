@@ -303,7 +303,6 @@ func main() {
 			}
 		}
 
-		heights := make([]uint64, 0, len(timestamps))
 		for height := range timestamps {
 
 			var timestamp time.Time
@@ -333,11 +332,14 @@ func main() {
 			}
 
 			timestamps[height] = time.Unix(int64(header.Time), 0).UTC()
-			heights = append(heights, height)
 		}
 
-		log.Info().Int("heights", len(heights)).Msg("heights successfully mapped to timestamps")
+		log.Info().Int("heights", len(timestamps)).Msg("heights successfully mapped to timestamps")
 
+		heights := make([]uint64, 0, len(timestamps))
+		for height := range timestamps {
+			heights = append(heights, height)
+		}
 		sort.Slice(heights, func(i int, j int) bool {
 			return heights[i] < heights[j]
 		})

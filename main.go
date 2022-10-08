@@ -67,7 +67,7 @@ func main() {
 	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
 	pflag.StringVarP(&gasPrices, "gas-prices", "g", "export-AvgGasPrice.csv", "CSV file for average gas price per day")
 	pflag.StringVarP(&heightTimestamps, "height-timestamps", "m", "", "CSV for block height to timestamp mapping")
-	pflag.StringVarP(&postgresServer, "postgres-server", "o", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
+	pflag.StringVarP(&postgresServer, "postgres-server", "r", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
 
 	pflag.Parse()
 

@@ -1,55 +1,46 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log"
-	"math/big"
 	"os"
 	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
 )
 
 func main() {
 
-	file, err := os.OpenFile("export-Height2Time.csv", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	cfg, err := config.LoadDefaultConfig(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
-	write := bufio.NewWriter(file)
+	client := lambda.NewFromConfig(cfg)
 
-	eth, err := ethclient.Dial("https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS")
-	if err != nil {
-		log.Fatal(err)
-	}
+	start := time.Date(2020, time.May, 7, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2022, time.October, 8, 0, 0, 0, 0, time.UTC)
 
-	for height := uint64(10019997); height <= 15701829; height++ {
-
-		header, err := eth.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		timestamp := time.Unix(int64(header.Time), 0).UTC()
-
-		_, err = write.WriteString(fmt.Sprintf("\"%d\",\"%s\"\n", height, timestamp.Format(time.RFC3339)))
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		fmt.Printf("%d => %s\n", height, timestamp.Format(time.RFC3339))
-	}
-
-	err = write.Flush()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = file.Close()
-	if err != nil {
-		log.Fatal(err)
+	for date := start; date.Before(end); date = date.AddDate(0, 0, 1) {
+		go func() {
+			name := fmt.Sprintf("blockchair_ethereum_blocks_%s.tsv.gz", date.Format("20060102"))
+			url := fmt.Sprintf("https://gz.blockchair.com/ethereum/blocks/" + name)
+			input := lambda.InvokeInput{
+				FunctionName: aws.String("worker"),
+				Payload:      []byte(url),
+			}
+			output, err := client.Invoke(context.Background(), &input)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = os.WriteFile(name, output.Payload, 0644)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}()
+		time.Sleep(time.Second / 50)
 	}
 
 	os.Exit(0)

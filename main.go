@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/csv"
@@ -49,7 +48,6 @@ func main() {
 		influxToken      string
 		influxOrg        string
 		influxBucket     string
-		gasPrices        string
 		heightTimestamps string
 		postgresServer   string
 	)
@@ -65,7 +63,6 @@ func main() {
 	pflag.StringVarP(&influxToken, "influx-token", "t", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
 	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
 	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
-	pflag.StringVarP(&gasPrices, "gas-prices", "g", "export-AvgGasPrice.csv", "CSV file for average gas price per day")
 	pflag.StringVarP(&heightTimestamps, "height_to_timestamp", "m", "", "CSV for block height to timestamp mapping")
 	pflag.StringVarP(&postgresServer, "postgres-server", "r", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
 
@@ -87,30 +84,6 @@ func main() {
 	}
 
 	log.Info().Msg("Uniswap pair ABI loaded")
-
-	data, err := os.ReadFile(gasPrices)
-	if err != nil {
-		log.Fatal().Err(err).Msg("could not read gas prices from file")
-	}
-	csvr := csv.NewReader(bytes.NewReader(data))
-	records, err := csvr.ReadAll()
-	if err != nil {
-		log.Fatal().Err(err).Msg("could not read gas price records")
-	}
-	prices := make(map[time.Time]uint64, len(records))
-	for _, record := range records[1:] {
-		day, err := time.Parse("1/2/2006", record[0])
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not parse gas price day")
-		}
-		value, err := strconv.ParseUint(record[2], 10, 64)
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not parse gas price value")
-		}
-		prices[day] = value
-	}
-
-	log.Info().Msg("daily gas price averages loaded from file")
 
 	db, err := sqlx.Connect("postgres", postgresServer)
 	if err != nil {

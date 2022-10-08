@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
+	"fmt"
 	"math/big"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +38,7 @@ func main() {
 		influxToken  string
 		influxOrg    string
 		influxBucket string
+		gasPrices    string
 	)
 
 	pflag.StringVarP(&ethAPI, "eth-api", "e", "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS", "Ethereum node JSON RPC API URL")
@@ -47,6 +52,7 @@ func main() {
 	pflag.StringVarP(&influxToken, "influx-token", "t", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
 	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
 	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
+	pflag.StringVarP(&gasPrices, "gas-prices", "g", "export-AvgGasPrice.csv", "CSV file for average gas price per day")
 
 	pflag.Parse()
 
@@ -65,11 +71,33 @@ func main() {
 		log.Fatal().Err(err).Msg("invalid Uniswap Pair ABI")
 	}
 
+	data, err := os.ReadFile(gasPrices)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not read gas prices from file")
+	}
+	read := csv.NewReader(bytes.NewReader(data))
+	records, err := read.ReadAll()
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not read gas price records")
+	}
+	prices := make(map[time.Time]uint64, len(records))
+	for _, record := range records[1:] {
+		day, err := time.Parse("1/2/2006", record[0])
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not parse gas price day")
+		}
+		value, err := strconv.ParseUint(record[2], 10, 64)
+		if err != nil {
+			log.Fatal().Err(err).Msg("could not parse gas price value")
+		}
+		prices[day] = value
+		fmt.Printf("%s - %d\n", day, value)
+	}
+
 	eth, err := ethclient.Dial(ethAPI)
 	if err != nil {
 		log.Fatal().Str("ethAPI", ethAPI).Err(err).Msg("could not connect to Ethereum API")
 	}
-
 	lastHeight, err := eth.BlockNumber(context.Background())
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not get last block height")

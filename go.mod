@@ -5,6 +5,7 @@ go 1.19
 require (
 	github.com/ethereum/go-ethereum v1.10.25
 	github.com/rs/zerolog v1.28.0
+	github.com/spf13/pflag v1.0.5
 )
 
 require (

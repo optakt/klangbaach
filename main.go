@@ -30,8 +30,8 @@ import (
 )
 
 var chainAPIs = map[string]string{
-	"ethereum": "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS",
-	"polygon":  "https://polygon-mainnet.g.alchemy.com/v2/eLm9vnnRUk_-tpUjpnXzRuxUdIBjKEla",
+	"ethereum": "https://eth-mainnet.g.alchemy.com/v2/",
+	"polygon":  "https://polygon-mainnet.g.alchemy.com/v2/",
 }
 
 type Mapping struct {
@@ -52,6 +52,8 @@ func main() {
 		chainName   string
 		pairAddress string
 
+		alchemyToken string
+
 		influxAPI    string
 		influxToken  string
 		influxOrg    string
@@ -69,8 +71,10 @@ func main() {
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 0, "start height for parsing Uniswap v2 pair events")
 	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
 
+	pflag.StringVarP(&alchemyToken, "alchemy-token", "a", "", "Alchemy authentication token")
+	pflag.StringVarP(&influxToken, "influx-token", "i", "", "InfluxDB authentication token")
+
 	pflag.StringVar(&influxAPI, "influx-api", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
-	pflag.StringVar(&influxToken, "influx-token", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
 	pflag.StringVar(&influxOrg, "influx-org", "optakt", "InfluxDB organization name")
 	pflag.StringVar(&influxBucket, "influx-bucket", "uniswap", "InfluxDB bucket name")
 
@@ -91,7 +95,7 @@ func main() {
 		log.Fatal().Str("chain_name", chainName).Msg("unknow chain name")
 	}
 
-	pair, err := abi.JSON(strings.NewReader(ABIPair))
+	abi, err := abi.JSON(strings.NewReader(PairMetaData.ABI))
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid Uniswap Pair ABI")
 	}
@@ -165,13 +169,46 @@ func main() {
 		}
 	}
 
-	eth, err := ethclient.Dial(apiURL)
+	eth, err := ethclient.Dial(apiURL + alchemyToken)
 	if err != nil {
 		log.Fatal().Str("api_url", apiURL).Err(err).Msg("could not connect to chain API")
 	}
+
 	lastHeight, err := eth.BlockNumber(context.Background())
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not get last block height")
+	}
+
+	pair, err := NewPairCaller(common.HexToAddress(pairAddress), eth)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not bind pair contract")
+	}
+
+	address0, err := pair.Token0(nil)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not get first token address")
+	}
+	address1, err := pair.Token1(nil)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not get second token address")
+	}
+
+	token0, err := NewERC20Caller(address0, eth)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not bind first token contract")
+	}
+	token1, err := NewERC20Caller(address1, eth)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not bind second token contract")
+	}
+
+	symbol0, err := token0.Symbol(nil)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not get first token symbol")
+	}
+	symbol1, err := token1.Symbol(nil)
+	if err != nil {
+		log.Fatal().Err(err).Msg("could not get second token symbol")
 	}
 
 	log.Info().Msg("connection to Ethereum API established")
@@ -237,7 +274,7 @@ func main() {
 
 			case SigSync:
 
-				err := pair.UnpackIntoInterface(&sync, "Sync", entry.Data)
+				err := abi.UnpackIntoInterface(&sync, "Sync", entry.Data)
 				if err != nil {
 					log.Fatal().Err(err).Msg("could not unpack sync event")
 				}
@@ -263,7 +300,7 @@ func main() {
 
 			case SigSwap:
 
-				err := pair.UnpackIntoInterface(&swap, "Swap", entry.Data)
+				err := abi.UnpackIntoInterface(&swap, "Swap", entry.Data)
 				if err != nil {
 					log.Fatal().Err(err).Msg("could not unpack swap event")
 				}
@@ -362,7 +399,7 @@ func main() {
 				Msg("datapoint queued for writing")
 
 			tags := map[string]string{
-				"pair": "ETH/USD",
+				"pair": symbol0 + "/" + symbol1,
 			}
 			fields := map[string]interface{}{
 				"volume0":  volume0.Bytes(),

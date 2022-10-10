@@ -101,16 +101,14 @@ func main() {
 		log.Fatal().Err(err).Msg("invalid Uniswap Pair ABI")
 	}
 
-	log.Info().Msg("Uniswap pair ABI loaded")
-
 	db, err := sqlx.Connect("postgres", postgresServer)
 	if err != nil {
 		log.Fatal().Str("postgres_server", postgresServer).Err(err).Msg("could not connect to Postgres server")
 	}
 
-	log.Info().Msg("Postgres database connection established")
-
 	if timestampMapping != "" {
+
+		log.Info().Msg("initializing block height to timestamp mapping")
 
 		file, err := os.Open(timestampMapping)
 		if err != nil {
@@ -145,7 +143,7 @@ func main() {
 			mappings = append(mappings, mapping)
 		}
 
-		log.Info().Int("mappings", len(mappings)).Msg("height-to-timestamp mappings loaded from CSV file")
+		log.Debug().Int("mappings", len(mappings)).Msg("block height to timestamp mappings loaded from CSV file")
 
 		err = file.Close()
 		if err != nil {
@@ -166,7 +164,7 @@ func main() {
 				log.Fatal().Err(err).Msg("could not execute batch insertion")
 			}
 
-			log.Info().Int("from", i).Int("to", j).Msg("batch of mappings inserted into database")
+			log.Debug().Int("from", i).Int("to", j).Msg("batch of mappings inserted into database")
 		}
 	}
 
@@ -212,8 +210,6 @@ func main() {
 		log.Fatal().Err(err).Msg("could not get second token symbol")
 	}
 
-	log.Info().Msg("connection to Ethereum API established")
-
 	influx := influxdb2.NewClient(influxAPI, influxToken)
 	ok, err = influx.Ready(context.Background())
 	if err != nil {
@@ -222,8 +218,6 @@ func main() {
 	if !ok {
 		log.Fatal().Msg("InfluxDB API not ready")
 	}
-
-	log.Info().Msg("connection to InfluxDB API established")
 
 	batch := influx.WriteAPI(influxOrg, influxBucket)
 	go func() {
@@ -252,7 +246,7 @@ func main() {
 			log.Fatal().Err(err).Msg("could not retrieve filtered log entries")
 		}
 
-		log.Info().
+		log.Debug().
 			Uint64("from", from).
 			Uint64("to", to).
 			Int("entries", len(entries)).
@@ -359,7 +353,7 @@ func main() {
 			timestamps[height] = time.Unix(int64(header.Time), 0).UTC()
 		}
 
-		log.Info().Int("heights", len(timestamps)).Msg("heights successfully mapped to timestamps")
+		log.Debug().Int("heights", len(timestamps)).Msg("heights successfully mapped to timestamps")
 
 		heights := make([]uint64, 0, len(timestamps))
 		for height := range timestamps {
@@ -391,7 +385,7 @@ func main() {
 				volume1 = big.NewInt(0)
 			}
 
-			log.Info().
+			log.Debug().
 				Time("timestamp", timestamp).
 				Str("reserve0", reserve0.String()).
 				Str("reserve1", reserve1.String()).
@@ -412,6 +406,13 @@ func main() {
 			point := write.NewPoint("ethereum", tags, fields, timestamp)
 			batch.WritePoint(point)
 		}
+
+		log.Info().
+			Uint64("from", from).
+			Uint64("to", to).
+			Int("heights", len(heights)).
+			Int("entries", len(entries)).
+			Msg("successfully processed block batch")
 	}
 
 	batch.Flush()

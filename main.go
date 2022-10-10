@@ -29,6 +29,11 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+var chainAPIs = map[string]string{
+	"ethereum": "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS",
+	"polygon":  "https://polygon-mainnet.g.alchemy.com/v2/eLm9vnnRUk_-tpUjpnXzRuxUdIBjKEla",
+}
+
 type Mapping struct {
 	Height    uint64    `json:"height"`
 	Timestamp time.Time `json:"timestamp"`
@@ -37,34 +42,36 @@ type Mapping struct {
 func main() {
 
 	var (
-		ethAPI           string
-		logLevel         string
-		pairAddress      string
-		pairName         string
-		startHeight      uint64
-		batchSize        uint
-		firstStable      bool
-		influxAPI        string
-		influxToken      string
-		influxOrg        string
-		influxBucket     string
-		heightTimestamps string
+		logLevel    string
+		batchSize   uint
+		startHeight uint64
+
+		timestampMapping string
 		postgresServer   string
+
+		chainName   string
+		pairAddress string
+
+		influxAPI    string
+		influxToken  string
+		influxOrg    string
+		influxBucket string
 	)
 
-	pflag.StringVarP(&ethAPI, "eth-api", "e", "https://eth-mainnet.g.alchemy.com/v2/UxuHkw-MO02DZ9qYM3usei-qmtlgx8SS", "Ethereum node JSON RPC API URL")
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
-	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
-	pflag.StringVarP(&pairName, "pair-name", "n", "WETH/USDC", "name of the Uniswap v2 pair")
-	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
 	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
-	pflag.BoolVarP(&firstStable, "first-stable", "f", false, "whether the first symbol in the pair is the stable")
+	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
+
+	pflag.StringVarP(&timestampMapping, "timestamp-mapping", "m", "", "CSV for block height to timestamp mapping")
+	pflag.StringVarP(&postgresServer, "postgres-server", "r", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
+
+	pflag.StringVarP(&chainName, "chain-name", "e", "ethereum", "name of the blockchain to index Uniswap on")
+	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
+
 	pflag.StringVarP(&influxAPI, "influx-api", "i", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
 	pflag.StringVarP(&influxToken, "influx-token", "t", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
 	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
 	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
-	pflag.StringVarP(&heightTimestamps, "height_to_timestamp", "m", "", "CSV for block height to timestamp mapping")
-	pflag.StringVarP(&postgresServer, "postgres-server", "r", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
 
 	pflag.Parse()
 
@@ -72,11 +79,16 @@ func main() {
 	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
 	level, err := zerolog.ParseLevel(logLevel)
 	if err != nil {
-		log.Fatal().Str("log_level", logLevel).Err(err).Msg("invalid zerolog log level")
+		log.Fatal().Str("log_level", logLevel).Err(err).Msg("invalid log level")
 	}
 	log = log.Level(level)
 
 	log.Info().Msg("starting klangbaach data miner")
+
+	apiURL, ok := chainAPIs[chainName]
+	if !ok {
+		log.Fatal().Str("chain_name", chainName).Msg("unknow chain name")
+	}
 
 	pair, err := abi.JSON(strings.NewReader(ABIPair))
 	if err != nil {
@@ -92,9 +104,9 @@ func main() {
 
 	log.Info().Msg("Postgres database connection established")
 
-	if heightTimestamps != "" {
+	if timestampMapping != "" {
 
-		file, err := os.Open(heightTimestamps)
+		file, err := os.Open(timestampMapping)
 		if err != nil {
 			log.Fatal().Err(err).Msg("could not open height timestamps")
 		}
@@ -152,9 +164,9 @@ func main() {
 		}
 	}
 
-	eth, err := ethclient.Dial(ethAPI)
+	eth, err := ethclient.Dial(apiURL)
 	if err != nil {
-		log.Fatal().Str("ethAPI", ethAPI).Err(err).Msg("could not connect to Ethereum API")
+		log.Fatal().Str("api_url", apiURL).Err(err).Msg("could not connect to chain API")
 	}
 	lastHeight, err := eth.BlockNumber(context.Background())
 	if err != nil {
@@ -164,7 +176,7 @@ func main() {
 	log.Info().Msg("connection to Ethereum API established")
 
 	influx := influxdb2.NewClient(influxAPI, influxToken)
-	ok, err := influx.Ready(context.Background())
+	ok, err = influx.Ready(context.Background())
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not connect to InfluxDB API")
 	}
@@ -340,27 +352,22 @@ func main() {
 				volume1 = big.NewInt(0)
 			}
 
-			reserve0Float, _ := big.NewFloat(0).SetInt(reserve0).Float64()
-			reserve1Float, _ := big.NewFloat(0).SetInt(reserve1).Float64()
-			volume0Float, _ := big.NewFloat(0).SetInt(volume0).Float64()
-			volume1Float, _ := big.NewFloat(0).SetInt(volume1).Float64()
-
 			log.Info().
 				Time("timestamp", timestamp).
-				Float64("reserve0", reserve0Float).
-				Float64("reserve1", reserve1Float).
-				Float64("volume0", volume0Float).
-				Float64("volume1", volume1Float).
+				Str("reserve0", reserve0.String()).
+				Str("reserve1", reserve1.String()).
+				Str("volume0", volume0.String()).
+				Str("volume1", volume1.String()).
 				Msg("datapoint queued for writing")
 
 			tags := map[string]string{
-				"pair": pairName,
+				"pair": "ETH/USD",
 			}
 			fields := map[string]interface{}{
-				"volume0":  volume0Float,
-				"volume1":  volume1Float,
-				"reserve0": reserve0Float,
-				"reserve1": reserve1Float,
+				"volume0":  volume0.Bytes(),
+				"volume1":  volume1.Bytes(),
+				"reserve0": reserve0.Bytes(),
+				"reserve1": reserve1.Bytes(),
 			}
 
 			point := write.NewPoint("ethereum", tags, fields, timestamp)

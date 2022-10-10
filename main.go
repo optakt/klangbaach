@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/csv"
+	"encoding/hex"
 	"errors"
 	"io"
 	"math/big"
@@ -65,14 +66,14 @@ func main() {
 	pflag.StringVarP(&timestampMapping, "timestamp-mapping", "t", "timestamps.csv", "CSV for block height to timestamp mapping")
 	pflag.StringVarP(&postgresServer, "postgres-server", "g", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
 
-	pflag.StringVarP(&chainName, "chain-name", "c", "ethereum", "name of the blockchain to index Uniswap on")
-	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
-
-	pflag.Uint64VarP(&startHeight, "start-height", "s", 0, "start height for parsing Uniswap v2 pair events")
-	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
-
 	pflag.StringVarP(&alchemyToken, "alchemy-token", "a", "", "Alchemy authentication token")
 	pflag.StringVarP(&influxToken, "influx-token", "i", "", "InfluxDB authentication token")
+
+	pflag.StringVarP(&chainName, "chain-name", "c", "ethereum", "name of the blockchain to index Uniswap on")
+	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
+	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
+
+	pflag.UintVar(&batchSize, "batch-size", 100, "number of blocks to cover per request for log entries")
 
 	pflag.StringVar(&influxAPI, "influx-api", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
 	pflag.StringVar(&influxOrg, "influx-org", "optakt", "InfluxDB organization name")
@@ -402,10 +403,10 @@ func main() {
 				"pair": symbol0 + "/" + symbol1,
 			}
 			fields := map[string]interface{}{
-				"volume0":  volume0.Bytes(),
-				"volume1":  volume1.Bytes(),
-				"reserve0": reserve0.Bytes(),
-				"reserve1": reserve1.Bytes(),
+				"volume0":  hex.EncodeToString(volume0.Bytes()),
+				"volume1":  hex.EncodeToString(volume1.Bytes()),
+				"reserve0": hex.EncodeToString(reserve0.Bytes()),
+				"reserve1": hex.EncodeToString(reserve1.Bytes()),
 			}
 
 			point := write.NewPoint("ethereum", tags, fields, timestamp)

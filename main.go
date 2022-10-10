@@ -59,19 +59,20 @@ func main() {
 	)
 
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
-	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
-	pflag.Uint64VarP(&startHeight, "start-height", "s", 0, "start height for parsing Uniswap v2 pair events")
 
-	pflag.StringVarP(&timestampMapping, "timestamp-mapping", "m", "", "CSV for block height to timestamp mapping")
-	pflag.StringVarP(&postgresServer, "postgres-server", "r", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
+	pflag.StringVarP(&timestampMapping, "timestamp-mapping", "t", "timestamps.csv", "CSV for block height to timestamp mapping")
+	pflag.StringVarP(&postgresServer, "postgres-server", "g", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
 
-	pflag.StringVarP(&chainName, "chain-name", "e", "ethereum", "name of the blockchain to index Uniswap on")
+	pflag.StringVarP(&chainName, "chain-name", "c", "ethereum", "name of the blockchain to index Uniswap on")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
 
-	pflag.StringVarP(&influxAPI, "influx-api", "i", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
-	pflag.StringVarP(&influxToken, "influx-token", "t", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
-	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
-	pflag.StringVarP(&influxBucket, "influx-bucket", "u", "uniswap", "InfluxDB bucket name")
+	pflag.Uint64VarP(&startHeight, "start-height", "s", 0, "start height for parsing Uniswap v2 pair events")
+	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
+
+	pflag.StringVar(&influxAPI, "influx-api", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
+	pflag.StringVar(&influxToken, "influx-token", "3Lq2o0e6-NmfpXK_UQbPqknKgQUbALMdNz86Ojhpm6dXGqGnCuEYGZijTMGhP82uxLfoWiWZRS2Vls0n4dZAjQ==", "InfluxDB authentication token")
+	pflag.StringVar(&influxOrg, "influx-org", "optakt", "InfluxDB organization name")
+	pflag.StringVar(&influxBucket, "influx-bucket", "uniswap", "InfluxDB bucket name")
 
 	pflag.Parse()
 

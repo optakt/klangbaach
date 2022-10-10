@@ -60,7 +60,7 @@ func main() {
 
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
 	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
-	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
+	pflag.Uint64VarP(&startHeight, "start-height", "s", 0, "start height for parsing Uniswap v2 pair events")
 
 	pflag.StringVarP(&timestampMapping, "timestamp-mapping", "m", "", "CSV for block height to timestamp mapping")
 	pflag.StringVarP(&postgresServer, "postgres-server", "r", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")

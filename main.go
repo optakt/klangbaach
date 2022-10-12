@@ -30,10 +30,12 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-var chainAPIs = map[string]string{
-	"ethereum": "https://eth-mainnet.g.alchemy.com/v2/",
-	"polygon":  "https://polygon-mainnet.g.alchemy.com/v2/",
-}
+var (
+	apis = map[string]string{
+		"ethereum": "https://eth-mainnet.g.alchemy.com/v2/",
+		"polygon":  "https://polygon-mainnet.g.alchemy.com/v2/",
+	}
+)
 
 type Mapping struct {
 	Height    uint64    `json:"height"`
@@ -50,7 +52,7 @@ func main() {
 		timestampMapping string
 		postgresServer   string
 
-		chainName   string
+		chain       string
 		pairAddress string
 
 		alchemyToken string
@@ -62,22 +64,21 @@ func main() {
 	)
 
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
+	pflag.UintVar(&batchSize, "batch-size", 100, "number of blocks to cover per request for log entries")
 
-	pflag.StringVarP(&timestampMapping, "timestamp-mapping", "t", "timestamps.csv", "CSV for block height to timestamp mapping")
-	pflag.StringVarP(&postgresServer, "postgres-server", "g", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
-
-	pflag.StringVarP(&alchemyToken, "alchemy-token", "a", "", "Alchemy authentication token")
-	pflag.StringVarP(&influxToken, "influx-token", "i", "", "InfluxDB authentication token")
-
-	pflag.StringVarP(&chainName, "chain-name", "c", "ethereum", "name of the blockchain to index Uniswap on")
+	pflag.StringVarP(&chain, "chain", "c", "ethereum", "name of the blockchain to index Uniswap on")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
 
-	pflag.UintVar(&batchSize, "batch-size", 100, "number of blocks to cover per request for log entries")
+	pflag.StringVarP(&timestampMapping, "block-timestamps", "t", "", "CSV for block height to timestamp mapping")
+	pflag.StringVarP(&postgresServer, "postgres-server", "g", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
+
+	pflag.StringVarP(&alchemyToken, "alchemy-token", "a", "", "Alchemy authentication token")
 
 	pflag.StringVar(&influxAPI, "influx-api", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
 	pflag.StringVar(&influxOrg, "influx-org", "optakt", "InfluxDB organization name")
 	pflag.StringVar(&influxBucket, "influx-bucket", "uniswap", "InfluxDB bucket name")
+	pflag.StringVarP(&influxToken, "influx-token", "i", "", "InfluxDB authentication token")
 
 	pflag.Parse()
 
@@ -91,9 +92,9 @@ func main() {
 
 	log.Info().Msg("starting klangbaach data miner")
 
-	apiURL, ok := chainAPIs[chainName]
+	api, ok := apis[chain]
 	if !ok {
-		log.Fatal().Str("chain_name", chainName).Msg("unknow chain name")
+		log.Fatal().Str("chain_name", chain).Msg("unknow chain name")
 	}
 
 	abi, err := abi.JSON(strings.NewReader(PairMetaData.ABI))
@@ -168,17 +169,17 @@ func main() {
 		}
 	}
 
-	eth, err := ethclient.Dial(apiURL + alchemyToken)
+	client, err := ethclient.Dial(api + alchemyToken)
 	if err != nil {
-		log.Fatal().Str("api_url", apiURL).Err(err).Msg("could not connect to chain API")
+		log.Fatal().Str("api", api).Err(err).Msg("could not connect to chain API")
 	}
 
-	lastHeight, err := eth.BlockNumber(context.Background())
+	lastHeight, err := client.BlockNumber(context.Background())
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not get last block height")
 	}
 
-	pair, err := NewPairCaller(common.HexToAddress(pairAddress), eth)
+	pair, err := NewPairCaller(common.HexToAddress(pairAddress), client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not bind pair contract")
 	}
@@ -192,11 +193,11 @@ func main() {
 		log.Fatal().Err(err).Msg("could not get second token address")
 	}
 
-	token0, err := NewERC20Caller(address0, eth)
+	token0, err := NewERC20Caller(address0, client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not bind first token contract")
 	}
-	token1, err := NewERC20Caller(address1, eth)
+	token1, err := NewERC20Caller(address1, client)
 	if err != nil {
 		log.Fatal().Err(err).Msg("could not bind second token contract")
 	}
@@ -241,7 +242,7 @@ func main() {
 			Topics:    [][]common.Hash{{SigSwap, SigSync}},
 		}
 
-		entries, err := eth.FilterLogs(context.Background(), query)
+		entries, err := client.FilterLogs(context.Background(), query)
 		if err != nil {
 			log.Fatal().Err(err).Msg("could not retrieve filtered log entries")
 		}
@@ -340,7 +341,7 @@ func main() {
 
 			log.Warn().Uint64("height", height).Msg("height not found in database, executing API request")
 
-			header, err := eth.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
+			header, err := client.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
 			if err != nil {
 				log.Fatal().Uint64("height", height).Err(err).Msg("could not get header for height")
 			}

@@ -65,7 +65,7 @@ func main() {
 	pflag.Parse()
 
 	zerolog.TimestampFunc = func() time.Time { return time.Now().UTC() }
-	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	log := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	level, err := zerolog.ParseLevel(logLevel)
 	if err != nil {
 		log.Fatal().Str("log_level", logLevel).Err(err).Msg("invalid log level")

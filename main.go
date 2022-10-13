@@ -34,8 +34,9 @@ const (
 func main() {
 
 	var (
-		logLevel  string
-		batchSize uint
+		logLevel     string
+		batchSize    uint
+		writeMetrics bool
 
 		pairAddress string
 		startHeight uint64
@@ -49,15 +50,16 @@ func main() {
 	)
 
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
-	pflag.UintVar(&batchSize, "batch-size", 100, "number of blocks to cover per request for log entries")
+	pflag.BoolVarP(&writeMetrics, "write-metrics", "w", false, "whether to write the datapoints to InfluxDB")
+	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
 
 	pflag.StringVarP(&apiURL, "api-url", "n", "", "JSON RPC API URL")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
 
-	pflag.StringVar(&influxURL, "influx-url", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
-	pflag.StringVar(&influxOrg, "influx-org", "optakt", "InfluxDB organization name")
-	pflag.StringVar(&influxBucket, "influx-bucket", "metrics", "InfluxDB bucket name")
+	pflag.StringVarP(&influxURL, "influx-url", "i", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
+	pflag.StringVarP(&influxOrg, "influx-org", "o", "optakt", "InfluxDB organization name")
+	pflag.StringVarP(&influxBucket, "influx-metrics-bucket", "m", "metrics", "InfluxDB bucket name")
 	pflag.StringVarP(&influxToken, "influx-token", "t", "", "InfluxDB authentication token")
 
 	pflag.Parse()
@@ -311,19 +313,21 @@ func main() {
 				volume1 = big.NewInt(0)
 			}
 
-			tags := map[string]string{
-				"chain": chainName,
-				"pair":  pairName,
-			}
-			fields := map[string]interface{}{
-				"reserve0": hex.EncodeToString(reserve0.Bytes()),
-				"reserve1": hex.EncodeToString(reserve1.Bytes()),
-				"volume0":  hex.EncodeToString(volume0.Bytes()),
-				"volume1":  hex.EncodeToString(volume1.Bytes()),
-			}
+			if writeMetrics {
+				tags := map[string]string{
+					"chain": chainName,
+					"pair":  pairName,
+				}
+				fields := map[string]interface{}{
+					"reserve0": hex.EncodeToString(reserve0.Bytes()),
+					"reserve1": hex.EncodeToString(reserve1.Bytes()),
+					"volume0":  hex.EncodeToString(volume0.Bytes()),
+					"volume1":  hex.EncodeToString(volume1.Bytes()),
+				}
 
-			point := write.NewPoint(measurement, tags, fields, timestamp)
-			batch.WritePoint(point)
+				point := write.NewPoint(measurement, tags, fields, timestamp)
+				batch.WritePoint(point)
+			}
 
 			log.Debug().
 				Time("timestamp", timestamp).

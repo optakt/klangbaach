@@ -2,20 +2,15 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"math/big"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
@@ -31,10 +26,9 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-type Mapping struct {
-	Height    uint64    `json:"height"`
-	Timestamp time.Time `json:"timestamp"`
-}
+const (
+	chainList = "chains.json"
+)
 
 func main() {
 
@@ -42,12 +36,8 @@ func main() {
 		logLevel  string
 		batchSize uint
 
-		chainList       string
-		pairAddress     string
-		startHeight     uint64
-		blockTimestamps string
-
-		postgresServer string
+		pairAddress string
+		startHeight uint64
 
 		apiURL string
 
@@ -60,14 +50,9 @@ func main() {
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
 	pflag.UintVar(&batchSize, "batch-size", 100, "number of blocks to cover per request for log entries")
 
-	pflag.StringVarP(&chainList, "chain-list", "c", "chains.json", "JSON file for Ethereum chain IDs")
+	pflag.StringVarP(&apiURL, "api-url", "n", "", "JSON RPC API URL")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
-	pflag.StringVarP(&blockTimestamps, "block-timestamps", "b", "", "CSV for block height to timestamp mapping")
-
-	pflag.StringVarP(&postgresServer, "postgres-server", "g", "host=localhost port=5432 user=postgres password=postgres dbname=klangbaach sslmode=disable", "Postgres server connection string")
-
-	pflag.StringVarP(&apiURL, "api-url", "n", "", "JSON RPC API URL")
 
 	pflag.StringVar(&influxURL, "influx-url", "https://eu-central-1-1.aws.cloud2.influxdata.com", "InfluxDB API URL")
 	pflag.StringVar(&influxOrg, "influx-org", "optakt", "InfluxDB organization name")
@@ -105,73 +90,6 @@ func main() {
 	chainLookup := make(map[uint64]string)
 	for _, chain := range chains {
 		chainLookup[chain.ChainID] = chain.Name
-	}
-
-	db, err := sqlx.Connect("postgres", postgresServer)
-	if err != nil {
-		log.Fatal().Str("postgres_server", postgresServer).Err(err).Msg("could not connect to Postgres server")
-	}
-
-	if blockTimestamps != "" {
-
-		log.Info().Msg("initializing block height to timestamp mapping")
-
-		file, err := os.Open(blockTimestamps)
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not open height timestamps")
-		}
-
-		csvr := csv.NewReader(file)
-		_, err = csvr.Read()
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not read first line of height to timestamp records")
-		}
-
-		var mappings []Mapping
-		for {
-			record, err := csvr.Read()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			height, err := strconv.ParseUint(record[0], 10, 64)
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not parse block height")
-			}
-			unix, err := strconv.ParseUint(record[1], 10, 64)
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not parse unix timestamp")
-			}
-			timestamp := time.Unix(int64(unix), 0).UTC()
-			mapping := Mapping{
-				Height:    height,
-				Timestamp: timestamp,
-			}
-			mappings = append(mappings, mapping)
-		}
-
-		log.Debug().Int("mappings", len(mappings)).Msg("block height to timestamp mappings loaded from CSV file")
-
-		err = file.Close()
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not close mapping file")
-		}
-
-		for i := 0; i < len(mappings); i += 1000 {
-
-			j := i + 1000
-			if j > len(mappings) {
-				j = len(mappings)
-			}
-
-			batch := mappings[i:j]
-
-			_, err = db.NamedExec(`INSERT INTO height_to_timestamp (height, timestamp) VALUES (:height, :timestamp) ON CONFLICT DO NOTHING`, batch)
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not execute batch insertion")
-			}
-
-			log.Debug().Int("from", i).Int("to", j).Msg("batch of mappings inserted into database")
-		}
 	}
 
 	client, err := ethclient.Dial(apiURL)
@@ -275,7 +193,7 @@ func main() {
 		volumes1 := make(map[uint64]*big.Int)
 
 		var swap Swap
-		var sync Sync
+		var sick Sync
 		for _, entry := range entries {
 
 			height := entry.BlockNumber
@@ -285,7 +203,7 @@ func main() {
 
 			case SigSync:
 
-				err := pairABI.UnpackIntoInterface(&sync, "Sync", entry.Data)
+				err := pairABI.UnpackIntoInterface(&sick, "Sync", entry.Data)
 				if err != nil {
 					log.Fatal().Err(err).Msg("could not unpack sync event")
 				}
@@ -295,18 +213,18 @@ func main() {
 					reserve0 = big.NewInt(0)
 					reserves0[height] = reserve0
 				}
-				reserve0.Add(reserve0, sync.Reserve0)
+				reserve0.Add(reserve0, sick.Reserve0)
 
 				reserve1, ok := reserves1[height]
 				if !ok {
 					reserve1 = big.NewInt(0)
 					reserves1[height] = reserve1
 				}
-				reserve1.Add(reserve1, sync.Reserve1)
+				reserve1.Add(reserve1, sick.Reserve1)
 
 				log.Debug().
-					Str("reserve0", sync.Reserve0.String()).
-					Str("reserve1", sync.Reserve1.String()).
+					Str("reserve0", sick.Reserve0.String()).
+					Str("reserve1", sick.Reserve1.String()).
 					Msg("sync decoded")
 
 			case SigSwap:
@@ -337,37 +255,19 @@ func main() {
 			}
 		}
 
+		wg := &sync.WaitGroup{}
 		for height := range timestamps {
-
-			var timestamp time.Time
-			row := db.QueryRowx("SELECT timestamp FROM height_to_timestamp WHERE height=$1", height)
-			err = row.Err()
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not select rows from database")
-			}
-			err = row.Scan(&timestamp)
-			if err == nil {
-				timestamps[height] = timestamp
-				continue
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				log.Fatal().Err(err).Msg("could not scan row to timestamp")
-			}
-
-			log.Warn().Uint64("height", height).Msg("height not found in database, executing API request")
-
-			header, err := client.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
-			if err != nil {
-				log.Fatal().Uint64("height", height).Err(err).Msg("could not get header for height")
-			}
-
-			_, err = db.Exec(`INSERT INTO height_to_timestamp (height, timestamp) VALUES ($1, $2)`, height, timestamp)
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not execute insertion of new timestamp")
-			}
-
-			timestamps[height] = time.Unix(int64(header.Time), 0).UTC()
+			wg.Add(1)
+			go func(height uint64) {
+				defer wg.Done()
+				header, err := client.HeaderByNumber(context.Background(), big.NewInt(0).SetUint64(height))
+				if err != nil {
+					log.Fatal().Uint64("height", height).Err(err).Msg("could not get header for height")
+				}
+				timestamps[height] = time.Unix(int64(header.Time), 0).UTC()
+			}(height)
 		}
+		wg.Wait()
 
 		log.Debug().Int("heights", len(timestamps)).Msg("heights successfully mapped to timestamps")
 

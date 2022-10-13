@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/ioutil"
 	"math/big"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -33,10 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-const (
-	chainsURL = "https://chainid.network/chains.json"
-)
-
 type Mapping struct {
 	Height    uint64    `json:"height"`
 	Timestamp time.Time `json:"timestamp"`
@@ -48,6 +42,7 @@ func main() {
 		logLevel  string
 		batchSize uint
 
+		chainList       string
 		pairAddress     string
 		startHeight     uint64
 		blockTimestamps string
@@ -65,6 +60,7 @@ func main() {
 	pflag.StringVarP(&logLevel, "log-level", "l", "info", "Zerolog logger minimum severity level")
 	pflag.UintVar(&batchSize, "batch-size", 100, "number of blocks to cover per request for log entries")
 
+	pflag.StringVarP(&chainList, "chain-list", "c", "chains.json", "JSON file for Ethereum chain IDs")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
 	pflag.StringVarP(&blockTimestamps, "block-timestamps", "b", "", "CSV for block height to timestamp mapping")
@@ -95,20 +91,15 @@ func main() {
 		log.Fatal().Err(err).Msg("invalid Uniswap Pair ABI")
 	}
 
-	chainsRes, err := http.Get(chainsURL)
+	chainsData, err := os.ReadFile(chainList)
 	if err != nil {
-		log.Fatal().Err(err).Str("chains", chainsURL).Msg("could not get chains data")
-	}
-
-	chainsData, err := ioutil.ReadAll(chainsRes.Body)
-	if err != nil {
-		log.Fatal().Err(err).Msg("could not read chains data")
+		log.Fatal().Err(err).Msg("could not read chain list")
 	}
 
 	var chains []Chain
 	err = json.Unmarshal(chainsData, &chains)
 	if err != nil {
-		log.Fatal().Err(err).Msg("could not decode chains data")
+		log.Fatal().Err(err).Msg("could not decode chain list")
 	}
 
 	chainLookup := make(map[uint64]string)

@@ -53,7 +53,7 @@ func main() {
 	pflag.BoolVarP(&writeMetrics, "write-metrics", "w", false, "whether to write the datapoints to InfluxDB")
 	pflag.UintVarP(&batchSize, "batch-size", "b", 100, "number of blocks to cover per request for log entries")
 
-	pflag.StringVarP(&apiURL, "api-url", "n", "", "JSON RPC API URL")
+	pflag.StringVarP(&apiURL, "api-url", "a", "", "JSON RPC API URL")
 	pflag.StringVarP(&pairAddress, "pair-address", "p", "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc", "Ethereum address for Uniswap v2 pair")
 	pflag.Uint64VarP(&startHeight, "start-height", "s", 10019997, "start height for parsing Uniswap v2 pair events")
 

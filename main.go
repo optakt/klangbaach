@@ -27,7 +27,8 @@ import (
 )
 
 const (
-	chainList = "chains.json"
+	measurement = "Uniswap v2"
+	chainList   = "chains.json"
 )
 
 func main() {
@@ -68,8 +69,6 @@ func main() {
 		log.Fatal().Str("log_level", logLevel).Err(err).Msg("invalid log level")
 	}
 	log = log.Level(level)
-
-	log.Info().Msg("starting klangbaach data miner")
 
 	pairABI, err := abi.JSON(strings.NewReader(PairMetaData.ABI))
 	if err != nil {
@@ -144,6 +143,17 @@ func main() {
 		log.Fatal().Err(err).Msg("could not get second token symbol")
 	}
 
+	pairName := symbol0 + "/" + symbol1
+
+	log = log.With().
+		Str("bucket", influxBucket).
+		Str("measurement", measurement).
+		Str("chain_name", chainName).
+		Str("pair_name", pairName).
+		Logger()
+
+	log.Info().Msg("determined labels for datapoints")
+
 	influx := influxdb2.NewClient(influxURL, influxToken)
 	ok, err = influx.Ready(context.Background())
 	if err != nil {
@@ -168,6 +178,8 @@ func main() {
 
 		to := from + uint64(batchSize) - 1
 
+		log = log.With().Uint64("from", from).Uint64("to", to).Logger()
+
 		query := ethereum.FilterQuery{
 			FromBlock: big.NewInt(0).SetUint64(from),
 			ToBlock:   big.NewInt(0).SetUint64(to),
@@ -180,11 +192,7 @@ func main() {
 			log.Fatal().Err(err).Msg("could not retrieve filtered log entries")
 		}
 
-		log.Debug().
-			Uint64("from", from).
-			Uint64("to", to).
-			Int("entries", len(entries)).
-			Msg("log entries fetched successfully")
+		log.Debug().Int("entries", len(entries)).Msg("processing log entries for block range")
 
 		timestamps := make(map[uint64]time.Time)
 		reserves0 := make(map[uint64]*big.Int)
@@ -255,8 +263,18 @@ func main() {
 			}
 		}
 
-		wg := &sync.WaitGroup{}
+		heights := make([]uint64, 0, len(timestamps))
 		for height := range timestamps {
+			heights = append(heights, height)
+		}
+		sort.Slice(heights, func(i int, j int) bool {
+			return heights[i] < heights[j]
+		})
+
+		log.Debug().Int("heights", len(heights)).Msg("retrieving timestamps for heights")
+
+		wg := &sync.WaitGroup{}
+		for _, height := range heights {
 			wg.Add(1)
 			go func(height uint64) {
 				defer wg.Done()
@@ -269,15 +287,7 @@ func main() {
 		}
 		wg.Wait()
 
-		log.Debug().Int("heights", len(timestamps)).Msg("heights successfully mapped to timestamps")
-
-		heights := make([]uint64, 0, len(timestamps))
-		for height := range timestamps {
-			heights = append(heights, height)
-		}
-		sort.Slice(heights, func(i int, j int) bool {
-			return heights[i] < heights[j]
-		})
+		log.Debug().Int("heights", len(heights)).Msg("writing datapoints for heights")
 
 		for _, height := range heights {
 
@@ -301,6 +311,20 @@ func main() {
 				volume1 = big.NewInt(0)
 			}
 
+			tags := map[string]string{
+				"chain": chainName,
+				"pair":  pairName,
+			}
+			fields := map[string]interface{}{
+				"reserve0": hex.EncodeToString(reserve0.Bytes()),
+				"reserve1": hex.EncodeToString(reserve1.Bytes()),
+				"volume0":  hex.EncodeToString(volume0.Bytes()),
+				"volume1":  hex.EncodeToString(volume1.Bytes()),
+			}
+
+			point := write.NewPoint(measurement, tags, fields, timestamp)
+			batch.WritePoint(point)
+
 			log.Debug().
 				Time("timestamp", timestamp).
 				Str("reserve0", reserve0.String()).
@@ -309,27 +333,9 @@ func main() {
 				Str("volume1", volume1.String()).
 				Msg("datapoint queued for writing")
 
-			tags := map[string]string{
-				"chain": chainName,
-				"pair":  symbol0 + "/" + symbol1,
-			}
-			fields := map[string]interface{}{
-				"volume0":  hex.EncodeToString(volume0.Bytes()),
-				"volume1":  hex.EncodeToString(volume1.Bytes()),
-				"reserve0": hex.EncodeToString(reserve0.Bytes()),
-				"reserve1": hex.EncodeToString(reserve1.Bytes()),
-			}
-
-			point := write.NewPoint("Uniswap v2", tags, fields, timestamp)
-			batch.WritePoint(point)
 		}
 
-		log.Info().
-			Uint64("from", from).
-			Uint64("to", to).
-			Int("heights", len(heights)).
-			Int("entries", len(entries)).
-			Msg("successfully processed block batch")
+		log.Info().Int("entries", len(entries)).Int("heights", len(heights)).Msg("processed log entries for block range")
 	}
 
 	batch.Flush()
